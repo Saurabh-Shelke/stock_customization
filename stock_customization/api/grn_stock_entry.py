@@ -70,15 +70,43 @@ def create_se_from_grn(doc, method):
         })
 
     se.insert(ignore_permissions=True)
+    # se.submit()
 
     # force store warehouses again (ERP removes internally)
     for item in se.items:
         frappe.db.set_value("Stock Entry Detail", item.name, "s_warehouse", source_wh)
         frappe.db.set_value("Stock Entry Detail", item.name, "t_warehouse", target_wh)
 
-    frappe.db.commit()
-
-    se.reload()
-    se.submit()
+    # frappe.db.commit()
+    # se.reload()
+    # se.submit()
+    frappe.enqueue(
+        submit_stock_entry_background,
+        queue="short",
+        enqueue_after_commit=True,
+        se_name=se.name,
+        source_wh=source_wh,
+        target_wh=target_wh
+    )   
 
     frappe.msgprint(f"Stock Entry Created: {se.name}")
+
+
+def submit_stock_entry_background(se_name, source_wh, target_wh):
+
+    try:
+        se = frappe.get_doc("Stock Entry", se_name)
+
+        for item in se.items:
+            frappe.db.set_value("Stock Entry Detail", item.name, "s_warehouse", source_wh)
+            frappe.db.set_value("Stock Entry Detail", item.name, "t_warehouse", target_wh)
+
+        frappe.db.commit()
+
+        se.reload()
+        se.submit()
+
+        frappe.db.commit()
+
+    except Exception as e:
+        frappe.log_error(frappe.get_traceback(), "Stock Entry Auto Submit Failed")
